@@ -51,3 +51,11 @@ This is not an officially supported Macmillan Learning product.
 Questions or comments should be directed to Jonathan Bratt
 (<jonathan.bratt@macmillan.com>) and Jon Harmon
 (<jonthegeek@gmail.com>).
+
+## License
+
+The C4 dataset is released under the terms of
+[ODC-BY](https://opendatacommons.org/licenses/by/1-0/). By using this
+package, you are also bound by the [Common Crawl terms of
+use](https://commoncrawl.org/terms-of-use/) in respect of the content
+contained in the dataset.

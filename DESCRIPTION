@@ -19,7 +19,7 @@ Authors@R: c(
 Description: Google's Colossal Common Crawl Corpus (C4) is an extremely large 
     corpus of text scraped from the internet. This package provides analyses 
     of the text contained in C4.
-License: Apache License (>= 2)
+License: GPL (>= 3)
 Encoding: UTF-8
 LazyData: true
 Roxygen: list(markdown = TRUE)
