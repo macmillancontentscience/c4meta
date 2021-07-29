@@ -393,7 +393,7 @@ saveRDS(
 )
 ```
 
-We haved to further process nonalpha to make them fit in RAM for summarizing.
+We had to further process nonalpha to make them fit in RAM for summarizing.
 
 ```{r full-counts-4b}
 count_summary_path_2 <- fs::path(
