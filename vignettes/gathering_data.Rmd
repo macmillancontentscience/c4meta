@@ -1,0 +1,461 @@
+---
+title: "Gathering the Data"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Gathering the Data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+This package contains analysis datasets derived from the C4 dataset. 
+This vignette describes how the analysis datasets were generated.
+The datasets were first downloaded in JSON format using the processes described by [AllenAI](https://github.com/allenai/allennlp/discussions/5056).
+
+```{r main-setup}
+# This is the block I reload whenever I have to restart my R session.
+library(purrr)
+library(fs)
+library(dplyr)
+
+# This is where the C4 json files are saved on my computer.
+source_folder <- "E:\\nlp\\c4\\en"
+```
+
+```{r other-packages}
+library(jsonlite)
+
+# {piecemaker} is a package for tokenizing text while preserving punctuation and
+# applying some other cleaning rules. It is not yet available on CRAN.
+
+# remotes::install_github("macmillancontentscience/piecemaker")
+library(piecemaker)
+```
+
+Note that this process assumes the `source_folder` has a `tokenized` subdirectory, in which there is a `counts` subdirectory.
+We also had to create `summaries` under `counts`, `summaries2` under that, and `summaries3` under that to help organize things to deal with the huge memory footprint involved.
+We ultimately divided the tokens into three groups at the end:
+
+- all-alphabetical (a-z and A-Z)
+- contain at least one digit
+- other
+
+It might have been faster to do that division at the very top, and we might do that when/if we examine other parts of the C4 dataset.
+
+Note also that the processing described here took multiple days to complete on a maching with 64GB of RAM and an Intel Core i7 processor.
+
+```{r parse}
+# Define a folder for both reading and writing.
+files <- list.files(
+  path = source_folder, 
+  pattern = "c4-.+json\\.gz",
+  full.names = TRUE
+)
+
+# Walk through those files, loading each, processing, and saving.
+purrr::walk(
+  files,
+  .f = function(this_file) {
+    this_text <- jsonlite::stream_in(file(this_file))[[1]]
+    this_filename_core <- fs::path_ext_remove(
+      fs::path_ext_remove(
+        fs::path_file(this_file)
+      )
+    )
+    these_tokens <- piecemaker::prepare_and_tokenize(
+      text = this_text,
+      prepare = TRUE,
+      # I specifically want to keep things as they originally appeared as much
+      # as possible, so I include these settings.
+      remove_diacritics = FALSE,
+      space_hyphens = FALSE,
+      space_abbreviations = FALSE
+    ) 
+    saveRDS(
+      these_tokens,
+      fs::path(
+        source_folder,
+        "tokenized",
+        this_filename_core,
+        ext = "rds"
+      )
+    )
+    # I save total counts at the same time as the processing. Here is where it
+    # might be helpful to divide into multiple "types" of tokens before moving
+    # on.
+    saveRDS(
+      dplyr::count(
+        data.frame(
+          token = unlist(these_tokens)
+        ),
+        token
+      ),
+      fs::path(
+        source_folder,
+        "tokenized",
+        "counts",
+        paste0(this_filename_core, "_counts"),
+        ext = "rds"
+      )
+    )
+  }
+)
+```
+
+After generating those tokens and counts, we sought to combine them into a summary.
+This took a lot more work than we expected, because the dataset is enormous. 
+There are a very large number of unique tokens in the data, partly because we intentionally retain things like capitalization and diacritics.
+
+The process we ended up following, in general:
+
+- Load a subset of the tokens into a single data.frame.
+- Summarize counts by unique token.
+- Save that subset.
+- Restart R (to clear everything out of RAM).
+- Repeat until this level has been fully processed.
+- Repeat the entire process, grouping the groups from the level above.
+
+The full dataset contains "train" files and "validation" files.
+We only want to use the "train" files for this set of counts.
+
+```{r full-counts-1}
+count_path <- fs::path(source_folder, "tokenized", "counts")
+train_count_files <- list.files(
+  path = count_path, 
+  pattern = "c4-train.*_counts\\.rds",
+  full.names = TRUE
+)
+
+# First, walk through sets of 16 files, compiling their information. There will
+# be 1024/16 = 64 such sets.
+purrr::walk(
+  1:64,
+  function(this_set) {
+    this_low <- 16L*(this_set - 1L) + 1L
+    this_high <- this_low + 15L
+    these_files <- train_count_files[this_low:this_high]
+    this_summary <- purrr::map_dfr(
+      these_files,
+      readRDS
+    ) %>% 
+      dplyr::group_by(token) %>% 
+      dplyr::summarize(n = sum(n))
+    saveRDS(
+      this_summary,
+      fs::path(
+        count_path,
+        "summaries",
+        paste0(
+          "c4-train-",
+          stringr::str_pad(this_low - 1L, width = 4, pad = "0"),
+          "-",
+          stringr::str_pad(this_high - 1L, width = 4, pad = "0")
+        ),
+        ext = "rds"
+      )
+    )
+  }
+)
+
+# That completed in 4.12 hr. Now compile those.
+```
+
+That took 4.12 hours to complete.
+We tried directly compiling, but we still ran out of RAM.
+
+```{r full-counts-2}
+count_summary_path <- fs::path(
+  source_folder, 
+  "tokenized", 
+  "counts", 
+  "summaries"
+)
+train_count_summary_files <- list.files(
+  path = count_summary_path, 
+  pattern = "c4-train.*\\.rds",
+  full.names = TRUE
+)
+
+# There are 64 summaries. We'll again use 16-file groups, so we just need 4
+# loops (in theory). I actually had to restart my R session for the 4th file,
+# because R didn't garbage collect very well and I ran out of RAM.
+purrr::walk(
+  4:4,
+  function(this_set) {
+    this_low <- 16L*(this_set - 1L) + 1L
+    this_high <- this_low + 15L
+    these_files <- train_count_summary_files[this_low:this_high]
+    this_summary <- purrr::map_dfr(
+      these_files,
+      readRDS
+    ) %>% 
+      dplyr::group_by(token) %>% 
+      dplyr::summarize(n = sum(n))
+    saveRDS(
+      this_summary,
+      fs::path(
+        count_summary_path,
+        "summaries2",
+        paste0(
+          "c4-train-",
+          stringr::str_pad((this_low - 1L)*16L, width = 4, pad = "0"),
+          "-",
+          stringr::str_pad(this_high*16L - 1L, width = 4, pad = "0")
+        ),
+        ext = "rds"
+      )
+    )
+  }
+)
+```
+
+I had to restart my R session several times during these processes to clear out RAM (despite having 64GB of RAM on this machine).
+
+```{r full-counts-3}
+count_summary_path_2 <- fs::path(
+  source_folder, 
+  "tokenized", 
+  "counts", 
+  "summaries",
+  "summaries2"
+)
+train_count_summary_files2 <- list.files(
+  path = count_summary_path_2, 
+  # I got specific with this pattern so I can put subdivided files in the same
+  # directory without breaking things.
+  pattern = "c4-train-\\d{4}-\\d{4}.rds",
+  full.names = TRUE
+)
+
+# Loading even 2 of these summaries into RAM is too much! We'll split them up,
+# and THEN combine.
+this_set <- 1L
+this_file <- train_count_summary_files2[[this_set]]
+summary1 <- readRDS(this_file)
+summary_nonalpha1 <- dplyr::filter(
+  summary1,
+  stringr::str_detect(token, "[^A-Za-z]")
+)
+
+this_set <- 2L
+this_file <- train_count_summary_files2[[this_set]]
+summary2 <- readRDS(this_file)
+summary_nonalpha2 <- dplyr::filter(
+  summary2,
+  stringr::str_detect(token, "[^A-Za-z]")
+)
+
+summary_nonalpha_12 <- dplyr::bind_rows(
+  summary_nonalpha1,
+  summary_nonalpha2
+) %>% 
+  dplyr::group_by(token) %>% 
+  dplyr::summarize(n = sum(n))
+
+saveRDS(
+  summary_nonalpha_12,
+  fs::path(
+    count_summary_path_2,
+    "c4-train-0000-0511-nonalpha.rds"
+  )
+)
+
+# rm'ing object and gc() weren't sufficient to get RAM back. I had to restart R, so now we'll focus on alpha.
+this_set <- 1L
+this_file <- train_count_summary_files2[[this_set]]
+summary1 <- readRDS(this_file)
+summary_alpha1 <- dplyr::filter(
+  summary1,
+  !stringr::str_detect(token, "[^A-Za-z]")
+)
+
+this_set <- 2L
+this_file <- train_count_summary_files2[[this_set]]
+summary2 <- readRDS(this_file)
+summary_alpha2 <- dplyr::filter(
+  summary2,
+  !stringr::str_detect(token, "[^A-Za-z]")
+)
+
+summary_alpha_12 <- dplyr::bind_rows(
+  summary_alpha1,
+  summary_alpha2
+) %>% 
+  dplyr::group_by(token) %>% 
+  dplyr::summarize(n = sum(n))
+
+saveRDS(
+  summary_alpha_12,
+  fs::path(
+    count_summary_path_2,
+    "c4-train-0000-0511-alpha.rds"
+  )
+)
+
+# Repeat for 3 & 4.
+this_set <- 3L
+this_file <- train_count_summary_files2[[this_set]]
+summary3 <- readRDS(this_file)
+summary_nonalpha3 <- dplyr::filter(
+  summary3,
+  stringr::str_detect(token, "[^A-Za-z]")
+)
+
+this_set <- 4L
+this_file <- train_count_summary_files2[[this_set]]
+summary4 <- readRDS(this_file)
+summary_nonalpha4 <- dplyr::filter(
+  summary4,
+  stringr::str_detect(token, "[^A-Za-z]")
+)
+
+summary_nonalpha_34 <- dplyr::bind_rows(
+  summary_nonalpha3,
+  summary_nonalpha4
+) %>% 
+  dplyr::group_by(token) %>% 
+  dplyr::summarize(n = sum(n))
+
+saveRDS(
+  summary_nonalpha_34,
+  fs::path(
+    count_summary_path_2,
+    "c4-train-0512-1023-nonalpha.rds"
+  )
+)
+
+this_set <- 3L
+this_file <- train_count_summary_files2[[this_set]]
+summary3 <- readRDS(this_file)
+summary_alpha3 <- dplyr::filter(
+  summary3,
+  !stringr::str_detect(token, "[^A-Za-z]")
+)
+
+this_set <- 4L
+this_file <- train_count_summary_files2[[this_set]]
+summary4 <- readRDS(this_file)
+summary_alpha4 <- dplyr::filter(
+  summary4,
+  !stringr::str_detect(token, "[^A-Za-z]")
+)
+
+summary_alpha_34 <- dplyr::bind_rows(
+  summary_alpha3,
+  summary_alpha4
+) %>% 
+  dplyr::group_by(token) %>% 
+  dplyr::summarize(n = sum(n))
+
+saveRDS(
+  summary_alpha_34,
+  fs::path(
+    count_summary_path_2,
+    "c4-train-0512-1023-alpha.rds"
+  )
+)
+```
+
+We combined the alphas into a single summary.
+
+```{r full-counts-4}
+count_summary_path_2 <- fs::path(
+  source_folder,
+  "tokenized",
+  "counts",
+  "summaries",
+  "summaries2"
+)
+summary_alpha <- purrr::map_dfr(
+  list.files(
+    path = count_summary_path_2, 
+    pattern = "c4-train-\\d{4}-\\d{4}-alpha.rds",
+    full.names = TRUE
+  ),
+  readRDS
+) %>% 
+  dplyr::group_by(token) %>% 
+  dplyr::summarize(n = sum(n))
+saveRDS(
+  summary_alpha,
+  fs::path(
+    count_summary_path_2,
+    "summaries3",
+    "c4-train-alpha.rds"
+  )
+)
+```
+
+We haved to further process nonalpha to make them fit in RAM for summarizing.
+
+```{r full-counts-4b}
+count_summary_path_2 <- fs::path(
+  source_folder,
+  "tokenized",
+  "counts",
+  "summaries",
+  "summaries2"
+)
+summary_nonalpha_pre <- purrr::map_dfr(
+  list.files(
+    path = count_summary_path_2, 
+    pattern = "c4-train-\\d{4}-\\d{4}-nonalpha.rds",
+    full.names = TRUE
+  ),
+  readRDS
+)
+
+summary_numeric_pre <- summary_nonalpha_pre %>% 
+  dplyr::filter(
+    stringr::str_detect(token, "\\d")
+  )
+summary_numeric <- summary_numeric_pre %>% 
+  dplyr::group_by(token) %>% 
+  dplyr::summarize(n = sum(n))
+saveRDS(
+  summary_numeric,
+  fs::path(
+    count_summary_path_2,
+    "summaries3",
+    "c4-train-numeric.rds"
+  )
+)
+
+summary_other_pre <- summary_nonalpha_pre %>% 
+  dplyr::filter(
+    !stringr::str_detect(token, "\\d")
+  )
+summary_other <- summary_other_pre %>% 
+  dplyr::group_by(token) %>% 
+  dplyr::summarize(n = sum(n))
+saveRDS(
+  summary_other,
+  fs::path(
+    count_summary_path_2,
+    "summaries3",
+    "c4-train-other.rds"
+  )
+)
+summary_other <- readRDS(
+  fs::path(
+    count_summary_path_2,
+    "summaries3",
+    "c4-train-other.rds"
+  )
+)
+```
+
+The final files are as follows:
+
+- `c4-train-alpha.rds` `485,373 KB`
+- `c4-train-numeric.rds` `342,313 KB`
+- `c4-train-other.rds` `356,219 KB`
+
+These tokens will be analyzed in a separate vignette.

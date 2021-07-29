@@ -11,7 +11,7 @@ experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](h
 
 The c4meta package provides metadata about the
 [C4](https://github.com/allenai/allennlp/discussions/5056) dataset
-(Google’s [Colossal Common Crawl
+(Google’s [Colossal Clean Crawled
 Corpus](https://www.tensorflow.org/datasets/catalog/c4))
 
 ## Installation
