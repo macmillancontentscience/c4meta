@@ -49,7 +49,7 @@ We ultimately divided the tokens into three groups at the end:
 
 It might have been faster to do that division at the very top, and we might do that when/if we examine other parts of the C4 dataset.
 
-Note also that the processing described here took multiple days to complete on a maching with 64GB of RAM and an Intel Core i7 processor.
+Note also that the processing described here took multiple days to complete on a machine with 64GB of RAM and an Intel Core i7 processor.
 
 ```{r parse}
 # Define a folder for both reading and writing.
