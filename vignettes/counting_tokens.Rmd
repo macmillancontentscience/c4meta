@@ -1,8 +1,8 @@
 ---
-title: "Gathering the Data"
+title: "Counting Tokens"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Gathering the Data}
+  %\VignetteIndexEntry{Counting Tokens}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -16,6 +16,7 @@ knitr::opts_chunk$set(
 ```
 
 This package contains analysis datasets derived from the C4 dataset. 
+The analyses are focused on token frequencies.
 This vignette describes how the analysis datasets were generated.
 The datasets were first downloaded in JSON format using the processes described by [AllenAI](https://github.com/allenai/allennlp/discussions/5056).
 
